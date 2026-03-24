@@ -1,0 +1,41 @@
+name: discover-registry
+
+on:
+  schedule:
+    - cron: "0 4 * * *"   # daily at 04:00 UTC
+  workflow_dispatch:       # manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Public-repo default: github.token is sufficient.
+          # Private-repo discovery: set GH_ORG_PAT and it will be preferred.
+          token: ${{ secrets.GH_ORG_PAT || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Discover ecosystem packages and update registry.json
+        env:
+          GH_TOKEN: ${{ secrets.GH_ORG_PAT || github.token }}
+          GH_OWNER: ${{ vars.ECO_OWNER }}     # preferred owner variable (org or user)
+          GH_ORG: ${{ vars.ECO_ORG }}         # backward-compatible fallback
+        run: node .github/scripts/discover.mjs
+
+      - name: Commit updated registry.json (if changed)
+        run: |
+          git config user.name  "eco-registry[bot]"
+          git config user.email "eco-registry@users.noreply.github.com"
+          git diff --quiet registry.json || (
+            git add registry.json &&
+            git commit -m "chore: update registry.json [skip ci]" &&
+            git push
+          )

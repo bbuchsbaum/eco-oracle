@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eco-atlas/source",
+  "title": "EcoAtlas Source Record",
+  "description": "Function body source code for an exported symbol, enabling eco_source lookups.",
+  "type": "object",
+  "required": ["symbol", "body"],
+  "additionalProperties": false,
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]+::[A-Za-z][A-Za-z0-9._-]+$",
+      "description": "Fully qualified symbol (pkg::fn)"
+    },
+    "language": {
+      "type": "string",
+      "enum": ["R", "Python"],
+      "description": "Source language"
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Full deparsed function body"
+    },
+    "source": {
+      "type": "object",
+      "required": ["path", "lines"],
+      "properties": {
+        "path": { "type": "string" },
+        "lines": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "description": "File path and line range in the source repo"
+    },
+    "internal_calls": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Qualified symbols called within the body (pkg::fn or pkg:::fn)"
+    }
+  }
+}

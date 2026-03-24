@@ -1,0 +1,7 @@
+node_modules/
+dist/
+atlas/
+atlas-pack.tgz
+*.tgz
+.env
+.omc/

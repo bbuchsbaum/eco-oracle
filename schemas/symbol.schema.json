@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SymbolRecord",
+  "description": "An exported symbol from a package",
+  "type": "object",
+  "required": ["symbol", "type", "signature", "summary"],
+  "properties": {
+    "symbol":    { "type": "string", "pattern": "^[a-z0-9._-]+::[A-Za-z0-9._]+$" },
+    "type":      { "type": "string", "enum": ["function", "class", "data", "method", "generic"] },
+    "signature": { "type": "string", "description": "Compact function/class signature" },
+    "summary":   { "type": "string", "description": "1-2 line description" },
+    "source": {
+      "type": "object",
+      "properties": {
+        "path":  { "type": "string" },
+        "lines": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 }
+      },
+      "additionalProperties": false
+    },
+    "tags":     { "type": "array", "items": { "type": "string" } },
+    "examples": { "type": "string", "description": "Short example snippet" }
+  },
+  "additionalProperties": false
+}

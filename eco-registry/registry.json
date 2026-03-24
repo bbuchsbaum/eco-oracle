@@ -1,0 +1,164 @@
+[
+  {
+    "repo": "bbuchsbaum/bidser",
+    "package": "bidser",
+    "language": "R",
+    "release_tag": "eco-atlas",
+    "asset": "atlas-pack.tgz",
+    "atlas_asset_url": "https://github.com/bbuchsbaum/bidser/releases/download/eco-atlas/atlas-pack.tgz",
+    "role": "ingest",
+    "tags": [
+      "bids",
+      "neuroimaging",
+      "fmri"
+    ],
+    "entrypoints": [
+      "bidser::bids_project",
+      "bidser::func_scans",
+      "bidser::read_events",
+      "bidser::read_confounds"
+    ],
+    "last_updated": "2026-02-20T12:01:25.459Z"
+  },
+  {
+    "repo": "bbuchsbaum/fmrihrf",
+    "package": "fmrihrf",
+    "language": "R",
+    "release_tag": "eco-atlas",
+    "asset": "atlas-pack.tgz",
+    "atlas_asset_url": "https://github.com/bbuchsbaum/fmrihrf/releases/download/eco-atlas/atlas-pack.tgz",
+    "role": "model",
+    "tags": [
+      "hemodynamic",
+      "regressor",
+      "hrf",
+      "convolve",
+      "neuroimaging",
+      "fmri",
+      "glm",
+      "design-matrix",
+      "bold",
+      "basis-set"
+    ],
+    "entrypoints": [
+      "fmrihrf::regressor",
+      "fmrihrf::single_trial_regressor",
+      "fmrihrf::sampling_frame",
+      "fmrihrf::evaluate",
+      "fmrihrf::getHRF",
+      "fmrihrf::gen_hrf",
+      "fmrihrf::HRF_SPMG1",
+      "fmrihrf::HRF_SPMG2",
+      "fmrihrf::HRF_SPMG3",
+      "fmrihrf::HRF_GAMMA",
+      "fmrihrf::HRF_GAUSSIAN",
+      "fmrihrf::HRF_BSPLINE",
+      "fmrihrf::HRF_FIR",
+      "fmrihrf::as_hrf",
+      "fmrihrf::bind_basis",
+      "fmrihrf::hrf_set",
+      "fmrihrf::hrf_library",
+      "fmrihrf::lag_hrf",
+      "fmrihrf::block_hrf",
+      "fmrihrf::normalise_hrf",
+      "fmrihrf::empirical_hrf",
+      "fmrihrf::hrf_bspline_generator",
+      "fmrihrf::hrf_fir_generator",
+      "fmrihrf::hrf_fourier_generator",
+      "fmrihrf::hrf_tent_generator",
+      "fmrihrf::hrf_lwu",
+      "fmrihrf::hrf_boxcar",
+      "fmrihrf::hrf_weighted",
+      "fmrihrf::plot_hrfs",
+      "fmrihrf::list_available_hrfs"
+    ],
+    "last_updated": "2026-02-20T12:01:28.712Z"
+  },
+  {
+    "repo": "bbuchsbaum/neuroatlas",
+    "package": "neuroatlas",
+    "language": "R",
+    "release_tag": "eco-atlas",
+    "asset": "atlas-pack.tgz",
+    "atlas_asset_url": "",
+    "role": "ingest",
+    "tags": [
+      "neuroimaging",
+      "atlas",
+      "parcellation",
+      "mni",
+      "templateflow",
+      "surface",
+      "schaefer",
+      "glasser",
+      "freesurfer",
+      "roi",
+      "visualization"
+    ],
+    "entrypoints": [
+      "get_schaefer_atlas",
+      "get_glasser_atlas",
+      "get_aseg_atlas",
+      "get_olsen_mtl",
+      "get_template",
+      "map_atlas",
+      "reduce_atlas",
+      "get_roi",
+      "dilate_atlas",
+      "plot_brain",
+      "cluster_explorer",
+      "merge_atlases",
+      "filter_atlas"
+    ],
+    "last_updated": "2026-02-20T12:01:33.592Z"
+  },
+  {
+    "repo": "bbuchsbaum/neuroim2",
+    "package": "neuroim2",
+    "language": "R",
+    "atlas_asset_url": "https://github.com/bbuchsbaum/neuroim2/releases/download/eco-atlas/atlas-pack.tgz",
+    "role": "neuroimaging",
+    "tags": [
+      "neuroimaging",
+      "fMRI",
+      "nifti",
+      "sparse",
+      "S4"
+    ],
+    "entrypoints": [
+      "neuroim2::read_vec",
+      "neuroim2::read_vol",
+      "neuroim2::NeuroVec",
+      "neuroim2::NeuroVol",
+      "neuroim2::ClusteredNeuroVec"
+    ],
+    "last_updated": "2026-02-20T01:51:55.264Z"
+  },
+  {
+    "repo": "bbuchsbaum/parade",
+    "package": "parade",
+    "language": "R",
+    "release_tag": "eco-atlas",
+    "asset": "atlas-pack.tgz",
+    "atlas_asset_url": "https://github.com/bbuchsbaum/parade/releases/download/eco-atlas/atlas-pack.tgz",
+    "role": "orchestrate",
+    "tags": [
+      "parallel",
+      "dataflow",
+      "hpc",
+      "slurm",
+      "future"
+    ],
+    "entrypoints": [
+      "parade::flow",
+      "parade::stage",
+      "parade::distribute",
+      "parade::collect",
+      "parade::pipeline",
+      "parade::submit_slurm",
+      "parade::grid",
+      "parade::schema"
+    ],
+    "last_updated": "2026-02-20T12:01:35.473Z"
+  }
+]

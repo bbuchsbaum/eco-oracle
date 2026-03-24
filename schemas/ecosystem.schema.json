@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EcosystemConfig",
+  "description": "Schema for .ecosystem.yml in a participating package repo",
+  "type": "object",
+  "required": ["ecosystem", "package", "language"],
+  "properties": {
+    "ecosystem":    { "type": "boolean", "const": true },
+    "package":      { "type": "string" },
+    "language":     { "type": "string", "enum": ["R", "Python"] },
+    "role":         { "type": "string", "description": "e.g. ingest, transform, model, report" },
+    "tags":         { "type": "array", "items": { "type": "string" } },
+    "entrypoints":  { "type": "array", "items": { "type": "string" }, "description": "Key exports to prioritize" },
+    "howto_seeds":  { "type": "array", "items": { "type": "string" }, "description": "How do I …? queries to ensure coverage" }
+  },
+  "additionalProperties": false
+}

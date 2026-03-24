@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AtlasManifest",
+  "description": "Metadata for an EcoAtlas Pack",
+  "type": "object",
+  "required": ["package", "version", "commit_sha", "language", "build_timestamp"],
+  "properties": {
+    "package":         { "type": "string", "description": "Package name (matches .ecosystem.yml)" },
+    "version":         { "type": "string", "description": "Package version (from DESCRIPTION)" },
+    "commit_sha":      { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "language":        { "type": "string", "enum": ["R", "Python"] },
+    "build_timestamp": { "type": "string", "format": "date-time" },
+    "role":            { "type": "string" },
+    "tags":            { "type": "array", "items": { "type": "string" } },
+    "entrypoints":     { "type": "array", "items": { "type": "string" } },
+    "card_count":      { "type": "integer", "minimum": 0 },
+    "symbol_count":    { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}

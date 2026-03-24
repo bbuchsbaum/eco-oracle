@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EdgeRecord",
+  "description": "Cross-package symbol reference",
+  "type": "object",
+  "required": ["from", "to", "source"],
+  "properties": {
+    "from":   { "type": "string", "pattern": "^[a-z0-9._-]+::[A-Za-z0-9._]+$" },
+    "to":     { "type": "string", "pattern": "^[a-z0-9._-]+::[A-Za-z0-9._]+$" },
+    "source": {
+      "type": "object",
+      "required": ["path", "lines"],
+      "properties": {
+        "path":  { "type": "string" },
+        "lines": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 }
+      },
+      "additionalProperties": false
+    },
+    "kind": { "type": "string", "enum": ["call", "import", "inherit", "uses"], "default": "call" }
+  },
+  "additionalProperties": false
+}

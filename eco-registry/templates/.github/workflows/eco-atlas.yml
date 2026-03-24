@@ -1,0 +1,392 @@
+name: eco-atlas
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to create/update a Release asset
+
+jobs:
+  build-eco-atlas:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+
+      - name: Install minimal extractor dependencies
+        run: |
+          Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org")); pkgs <- c("jsonlite","digest","desc"); miss <- setdiff(pkgs, rownames(installed.packages())); if (length(miss) > 0) install.packages(miss)'
+
+      - name: Build EcoAtlas snippet/symbol packs (best effort)
+        continue-on-error: true
+        env:
+          ECO_ATLAS_OUT: atlas
+          ECO_ATLAS_MAX_SNIPPETS: "200"
+          ECO_ATLAS_INCLUDE_TESTS: "0"
+        run: Rscript tools/eco_atlas_extract.R
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Ensure atlas baseline artifacts
+        env:
+          ECO_ATLAS_OUT: atlas
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const outDir = process.env.ECO_ATLAS_OUT || "atlas";
+          const descPath = "DESCRIPTION";
+          const nsPath = "NAMESPACE";
+          const ecoPath = ".ecosystem.yml";
+          fs.mkdirSync(outDir, { recursive: true });
+
+          const readText = (p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "");
+          const readLines = (p) => readText(p).split(/\r?\n/);
+
+          function descField(name) {
+            const raw = readText(descPath);
+            const m = raw.match(new RegExp(`^${name}:\\s*(.+)$`, "m"));
+            return m ? m[1].trim() : "";
+          }
+
+          function ecoScalar(key) {
+            const rx = new RegExp(`^${key}:\\s*(.+)$`);
+            for (const ln of readLines(ecoPath)) {
+              const m = ln.trim().match(rx);
+              if (!m) continue;
+              return m[1].trim().replace(/^['"]|['"]$/g, "");
+            }
+            return "";
+          }
+
+          function ecoList(key) {
+            const lines = readLines(ecoPath);
+            if (lines.length === 0) return [];
+            const out = [];
+            const keyInline = new RegExp(`^${key}:\\s*\\[(.*)\\]\\s*$`);
+            for (const ln of lines) {
+              const m = ln.trim().match(keyInline);
+              if (!m) continue;
+              const body = m[1].trim();
+              if (!body) return [];
+              return body
+                .split(",")
+                .map((x) => x.trim().replace(/^['"]|['"]$/g, ""))
+                .filter(Boolean);
+            }
+
+            let inBlock = false;
+            for (const ln of lines) {
+              if (!inBlock) {
+                if (ln.trim() === `${key}:`) inBlock = true;
+                continue;
+              }
+              if (/^\s*-\s+/.test(ln)) {
+                out.push(ln.replace(/^\s*-\s+/, "").replace(/\s+#.*$/, "").trim().replace(/^['"]|['"]$/g, ""));
+                continue;
+              }
+              if (/^\s*$/.test(ln)) continue;
+              if (!/^\s+/.test(ln)) break;
+            }
+            return out.filter(Boolean);
+          }
+
+          function parseNamespaceExports() {
+            const raw = readText(nsPath);
+            const out = [];
+            const re = /export\s*\(([^)]*)\)/g;
+            for (const m of raw.matchAll(re)) {
+              const inside = m[1] || "";
+              for (const part of inside.split(",")) {
+                const sym = part.trim().replace(/^['"]|['"]$/g, "");
+                if (sym) out.push(sym);
+              }
+            }
+            return [...new Set(out)];
+          }
+
+          function readJsonl(filePath) {
+            if (!fs.existsSync(filePath)) return [];
+            const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/).filter(Boolean);
+            const out = [];
+            for (const ln of lines) {
+              try {
+                out.push(JSON.parse(ln));
+              } catch (_) {}
+            }
+            return out;
+          }
+
+          function writeJsonl(filePath, rows) {
+            const body = rows.map((r) => JSON.stringify(r)).join("\n");
+            fs.writeFileSync(filePath, body ? `${body}\n` : "", "utf8");
+          }
+
+          const repo = process.env.GITHUB_REPOSITORY || "";
+          const repoPkg = repo.includes("/") ? repo.split("/")[1] : "unknownpkg";
+          const pkg = ecoScalar("package") || descField("Package") || repoPkg;
+          const ver = descField("Version") || "0.0.0";
+          const lang = ecoScalar("language") || "R";
+          const sha = process.env.GITHUB_SHA || "";
+
+          const manifestPath = path.join(outDir, "manifest.json");
+          if (!fs.existsSync(manifestPath)) {
+            const now = new Date().toISOString();
+            const manifest = {
+              package: pkg,
+              version: ver,
+              language: lang,
+              commit_sha: sha,
+              build_timestamp: now,
+              commit: sha,
+              built_at_utc: now
+            };
+            fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+          }
+
+          const symPath = path.join(outDir, "symbols.jsonl");
+          const symbols = readJsonl(symPath);
+          const have = new Set(symbols.map((s) => String(s.symbol || "")));
+          const entrypoints = ecoList("entrypoints");
+          const epSymbols = entrypoints
+            .map((ep) => ep.includes("::") ? ep : `${pkg}::${ep}`)
+            .filter(Boolean);
+          const nsSymbols = parseNamespaceExports().map((fn) => `${pkg}::${fn}`);
+
+          for (const sym of [...new Set([...epSymbols, ...nsSymbols])]) {
+            if (have.has(sym)) continue;
+            const fn = sym.includes("::") ? sym.split("::")[1] : sym;
+            symbols.push({
+              symbol: sym,
+              language: lang,
+              type: "function",
+              signature: `${fn}(...)`,
+              summary: null,
+              source: { path: null, lines: null }
+            });
+            have.add(sym);
+          }
+          writeJsonl(symPath, symbols);
+
+          for (const file of ["snippets.jsonl", "cards.jsonl", "edges.jsonl"]) {
+            const p = path.join(outDir, file);
+            if (!fs.existsSync(p)) fs.writeFileSync(p, "", "utf8");
+          }
+          NODE
+
+      - name: Distill microcards via LLM (optional, best effort)
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ECO_ATLAS_MODEL: gpt-4o-mini
+          ECO_ATLAS_OUT: atlas
+          ECO_ATLAS_MAX_CARDS_PER_SNIPPET: "2"
+          ECO_ATLAS_REQUESTS_PER_RUN: "60"
+          ECO_ATLAS_INCLUDE_TEST_CARDS: "0"
+          ECO_ATLAS_MIN_SYMBOLS: "1"
+          ECO_ATLAS_MIN_CARDS: "1"
+          ECO_ATLAS_ENFORCE_EXPORT_SYMBOLS: "0"
+          ECO_ATLAS_ENFORCE_ENTRYPOINTS: "0"
+        run: node tools/eco_atlas_distill.mjs
+
+      - name: Merge manual cards and synthesize fallback cards
+        env:
+          ECO_ATLAS_OUT: atlas
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const outDir = process.env.ECO_ATLAS_OUT || "atlas";
+          const manualPath = "manual_cards.jsonl";
+          const ecoPath = ".ecosystem.yml";
+          const manifestPath = path.join(outDir, "manifest.json");
+          const cardsPath = path.join(outDir, "cards.jsonl");
+          const symbolsPath = path.join(outDir, "symbols.jsonl");
+          const edgesPath = path.join(outDir, "edges.jsonl");
+
+          const readText = (p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "");
+          const readLines = (p) => readText(p).split(/\r?\n/);
+
+          function readJsonl(filePath) {
+            if (!fs.existsSync(filePath)) return [];
+            const out = [];
+            for (const ln of fs.readFileSync(filePath, "utf8").split(/\r?\n/).filter(Boolean)) {
+              try {
+                out.push(JSON.parse(ln));
+              } catch (_) {}
+            }
+            return out;
+          }
+
+          function writeJsonl(filePath, rows) {
+            const body = rows.map((r) => JSON.stringify(r)).join("\n");
+            fs.writeFileSync(filePath, body ? `${body}\n` : "", "utf8");
+          }
+
+          function ecoList(key) {
+            const lines = readLines(ecoPath);
+            if (lines.length === 0) return [];
+            const out = [];
+            const keyInline = new RegExp(`^${key}:\\s*\\[(.*)\\]\\s*$`);
+            for (const ln of lines) {
+              const m = ln.trim().match(keyInline);
+              if (!m) continue;
+              const body = m[1].trim();
+              if (!body) return [];
+              return body
+                .split(",")
+                .map((x) => x.trim().replace(/^['"]|['"]$/g, ""))
+                .filter(Boolean);
+            }
+
+            let inBlock = false;
+            for (const ln of lines) {
+              if (!inBlock) {
+                if (ln.trim() === `${key}:`) inBlock = true;
+                continue;
+              }
+              if (/^\s*-\s+/.test(ln)) {
+                out.push(ln.replace(/^\s*-\s+/, "").replace(/\s+#.*$/, "").trim().replace(/^['"]|['"]$/g, ""));
+                continue;
+              }
+              if (/^\s*$/.test(ln)) continue;
+              if (!/^\s+/.test(ln)) break;
+            }
+            return out.filter(Boolean);
+          }
+
+          const manifest = fs.existsSync(manifestPath)
+            ? JSON.parse(fs.readFileSync(manifestPath, "utf8"))
+            : { package: "unknownpkg", language: "R" };
+          const pkg = String(manifest.package || "unknownpkg");
+          const lang = String(manifest.language || "R");
+          const tags = ecoList("tags").map((t) => t.toLowerCase());
+          const entrypoints = ecoList("entrypoints")
+            .map((ep) => ep.includes("::") ? ep : `${pkg}::${ep}`)
+            .filter(Boolean);
+
+          let cards = readJsonl(cardsPath);
+
+          if (fs.existsSync(manualPath)) {
+            const manualCards = [];
+            const lines = fs.readFileSync(manualPath, "utf8").split(/\r?\n/);
+            for (let i = 0; i < lines.length; i++) {
+              const ln = lines[i].trim();
+              if (!ln) continue;
+              let rec;
+              try {
+                rec = JSON.parse(ln);
+              } catch (_) {
+                continue;
+              }
+              const q = String(rec.q || "").trim();
+              const a = String(rec.a || "").trim();
+              const recipe = String(rec.recipe || "").trim();
+              if (!q || !a || !recipe) continue;
+
+              const symbols = Array.isArray(rec.symbols)
+                ? rec.symbols
+                    .map((s) => String(s || "").trim())
+                    .filter(Boolean)
+                    .map((s) => s.includes("::") ? s : `${pkg}::${s}`)
+                : [];
+              if (symbols.length === 0) continue;
+
+              manualCards.push({
+                id: String(rec.id || `manual#${i + 1}`),
+                package: rec.package || pkg,
+                language: rec.language || lang,
+                q,
+                a,
+                recipe,
+                tags: Array.isArray(rec.tags) ? rec.tags : tags,
+                symbols,
+                sources: Array.isArray(rec.sources) && rec.sources.length > 0
+                  ? rec.sources
+                  : [{ path: manualPath, lines: [i + 1, i + 1] }]
+              });
+            }
+
+            if (manualCards.length > 0) {
+              const byId = new Map(cards.map((c, i) => [String(c.id || `generated#${i + 1}`), c]));
+              for (const c of manualCards) byId.set(String(c.id), c);
+              cards = Array.from(byId.values());
+            }
+          }
+
+          if (cards.length === 0 && entrypoints.length > 0) {
+            cards = entrypoints.map((sym, idx) => {
+              const fn = sym.split("::")[1] || sym;
+              return {
+                id: `fallback#${idx + 1}`,
+                package: pkg,
+                language: lang,
+                q: `How do I use ${sym}?`,
+                a: `Start with ${sym} as an ecosystem entrypoint.`,
+                recipe: `library(${pkg})\\n${fn}(...)`,
+                tags,
+                symbols: [sym],
+                sources: [{ path: ".ecosystem.yml", lines: [1, 1] }]
+              };
+            });
+          }
+
+          writeJsonl(cardsPath, cards);
+          if (!fs.existsSync(edgesPath)) fs.writeFileSync(edgesPath, "", "utf8");
+
+          const symbols = readJsonl(symbolsPath);
+          const symbolSet = new Set(symbols.map((s) => String(s.symbol || "")));
+          for (const c of cards) {
+            for (const sym of (c.symbols || [])) {
+              const normalized = String(sym || "");
+              if (!normalized || symbolSet.has(normalized)) continue;
+              const fn = normalized.includes("::") ? normalized.split("::")[1] : normalized;
+              symbols.push({
+                symbol: normalized,
+                language: lang,
+                type: "function",
+                signature: `${fn}(...)`,
+                summary: null,
+                source: { path: ".ecosystem.yml", lines: [1, 1] }
+              });
+              symbolSet.add(normalized);
+            }
+          }
+          writeJsonl(symbolsPath, symbols);
+          NODE
+
+      - name: Atlas summary
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const outDir = "atlas";
+          const count = (name) => {
+            const p = path.join(outDir, name);
+            if (!fs.existsSync(p)) return 0;
+            return fs.readFileSync(p, "utf8").split(/\r?\n/).filter(Boolean).length;
+          };
+          console.log(`Atlas counts: cards=${count("cards.jsonl")} symbols=${count("symbols.jsonl")} edges=${count("edges.jsonl")} snippets=${count("snippets.jsonl")}`);
+          NODE
+
+      - name: Pack
+        if: always()
+        run: tar -czf atlas-pack.tgz atlas/
+
+      - name: Publish Release asset (eco-atlas)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view eco-atlas --repo "$GITHUB_REPOSITORY" \
+            || gh release create eco-atlas -t "eco-atlas" -n "Auto-generated EcoAtlas pack"
+          gh release upload eco-atlas atlas-pack.tgz --clobber

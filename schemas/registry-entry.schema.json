@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RegistryEntry",
+  "description": "An entry in registry.json for a participating package repo",
+  "type": "object",
+  "required": ["repo", "package", "language"],
+  "properties": {
+    "repo":            { "type": "string", "description": "org/repo-name" },
+    "package":         { "type": "string" },
+    "language":        { "type": "string", "enum": ["R", "Python"] },
+    "atlas_asset_url": { "type": "string", "format": "uri", "description": "Optional direct URL to latest atlas-pack.tgz" },
+    "release_tag":     { "type": "string", "description": "Release tag containing atlas-pack.tgz (default: eco-atlas)" },
+    "asset":           { "type": "string", "description": "Release asset filename (default: atlas-pack.tgz)" },
+    "role":            { "type": "string" },
+    "tags":            { "type": "array", "items": { "type": "string" } },
+    "entrypoints":     { "type": "array", "items": { "type": "string" } },
+    "last_updated":    { "type": "string", "format": "date-time" }
+  },
+  "oneOf": [
+    { "required": ["atlas_asset_url"] },
+    { "required": ["release_tag", "asset"] }
+  ],
+  "additionalProperties": false
+}

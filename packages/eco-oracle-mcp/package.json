@@ -1,0 +1,50 @@
+{
+  "name": "eco-oracle-mcp",
+  "version": "0.1.1",
+  "description": "EcoOracle MCP server — semantic search over an internal R/Python package ecosystem",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ecosystem",
+    "r",
+    "python"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "bin": {
+    "eco-oracle-mcp": "dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "lint": "eslint src",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "tar": "^7.5.9",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

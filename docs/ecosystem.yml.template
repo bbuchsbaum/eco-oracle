@@ -1,0 +1,23 @@
+ecosystem: true
+
+# Human name of the package (should match DESCRIPTION "Package")
+package: mypkg
+
+# Today: R. Later: Python packages can use "Python"
+language: R
+
+# Optional metadata to improve ranking + discovery
+role: ingest            # ingest | clean | model | viz | io | validate | utils
+tags:
+  - transactions
+  - canonicalization
+
+# Optional: exported "entrypoints" (high-signal functions)
+entrypoints:
+  - mypkg::canonicalize_transactions
+  - mypkg::read_vendor_feed
+
+# Optional: seed questions (guarantees these appear as microcards if evidence exists)
+howto_seeds:
+  - "How do I canonicalize raw transactions into the standard schema?"
+  - "How do I read and standardize vendor CSV feeds?"
