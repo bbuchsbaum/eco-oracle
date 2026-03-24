@@ -21,6 +21,12 @@ jobs:
         run: |
           Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org")); pkgs <- c("jsonlite","digest","desc"); miss <- setdiff(pkgs, rownames(installed.packages())); if (length(miss) > 0) install.packages(miss)'
 
+      - name: Fetch EcoAtlas tools from eco-oracle
+        run: |
+          mkdir -p tools
+          curl -sL https://raw.githubusercontent.com/bbuchsbaum/eco-oracle/main/tools/eco_atlas_extract.R -o tools/eco_atlas_extract.R
+          curl -sL https://raw.githubusercontent.com/bbuchsbaum/eco-oracle/main/tools/eco_atlas_distill.mjs -o tools/eco_atlas_distill.mjs
+
       - name: Build EcoAtlas snippet/symbol packs (best effort)
         continue-on-error: true
         env:
@@ -175,7 +181,7 @@ jobs:
           }
           writeJsonl(symPath, symbols);
 
-          for (const file of ["snippets.jsonl", "cards.jsonl", "edges.jsonl"]) {
+          for (const file of ["snippets.jsonl", "cards.jsonl", "edges.jsonl", "sources.jsonl"]) {
             const p = path.join(outDir, file);
             if (!fs.existsSync(p)) fs.writeFileSync(p, "", "utf8");
           }
@@ -375,7 +381,7 @@ jobs:
             if (!fs.existsSync(p)) return 0;
             return fs.readFileSync(p, "utf8").split(/\r?\n/).filter(Boolean).length;
           };
-          console.log(`Atlas counts: cards=${count("cards.jsonl")} symbols=${count("symbols.jsonl")} edges=${count("edges.jsonl")} snippets=${count("snippets.jsonl")}`);
+          console.log(`Atlas counts: cards=${count("cards.jsonl")} symbols=${count("symbols.jsonl")} sources=${count("sources.jsonl")} edges=${count("edges.jsonl")} snippets=${count("snippets.jsonl")}`);
           NODE
 
       - name: Pack
