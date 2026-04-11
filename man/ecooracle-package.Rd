@@ -6,5 +6,6 @@
   A small helper package that wraps the canonical EcoOracle bootstrap script.
   Install it from GitHub, then call \code{ecooracle::use_ecooracle()} from an
   R package repository to scaffold or refresh EcoOracle onboarding files.
+  Use \code{ecooracle::check_health()} to run the bundled EcoDoctor checks from
+  R.
 }
-

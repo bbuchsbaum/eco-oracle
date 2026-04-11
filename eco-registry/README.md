@@ -56,6 +56,9 @@ ecooracle::use_ecooracle(
   run_workflow = TRUE,
   run_discovery = TRUE
 )
+
+# verify local repo health from R
+ecooracle::check_health()
 ```
 
 Or from a shell, run the bootstrap script:

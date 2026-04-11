@@ -57,6 +57,9 @@ ecooracle::use_ecooracle(
   run_workflow = TRUE,
   run_discovery = TRUE
 )
+
+# check local onboarding health
+ecooracle::check_health()
 ```
 
 1. Add `.ecosystem.yml` at repo root:

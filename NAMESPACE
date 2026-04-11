@@ -1,2 +1,5 @@
+S3method(print,ecooracle_health)
+export(check_health)
+export(health)
 export(use_ecooracle)
-
+importFrom(jsonlite,fromJSON)

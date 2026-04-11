@@ -8,7 +8,8 @@ Description: Provides a small R helper for onboarding R packages into the
     canonical bootstrap script to scaffold '.ecosystem.yml', workflow files,
     and EcoAtlas tools into a package repository.
 License: MIT + file LICENSE
+Imports:
+    jsonlite
 Encoding: UTF-8
 RoxygenNote: 7.3.2
 SystemRequirements: bash
-

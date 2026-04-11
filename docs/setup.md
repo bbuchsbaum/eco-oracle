@@ -75,6 +75,9 @@ ecooracle::use_ecooracle(
   run_workflow = TRUE,
   run_discovery = TRUE
 )
+
+# local readiness checks
+ecooracle::check_health()
 ```
 
 Or manually:
