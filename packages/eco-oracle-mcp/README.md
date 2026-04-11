@@ -38,3 +38,29 @@ Default shared registry URL:
 - `eco_packages`
 - `eco_where_used`
 - `eco_refresh`
+
+## Benchmarks
+
+Run the local benchmark harness against fixed synthetic fixtures:
+
+```bash
+npm run bench --workspace=packages/eco-oracle-mcp
+```
+
+Useful options:
+
+- `--packages 24`
+- `--cards-per-package 40`
+- `--symbols-per-package 80`
+- `--edges-per-package 120`
+- `--iterations 5`
+- `--json`
+
+The harness measures:
+
+- registry-only `eco_packages` cold path
+- snapshot hydrate + counted `eco_packages`
+- full pack refresh
+- warm `eco_packages`
+- warm symbol lookup
+- warm card search
