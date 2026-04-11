@@ -57,6 +57,18 @@ From the package repo, ask your agent:
 
 The `eco-join` skill will scaffold all required files.
 
+Or from R:
+
+```r
+# install.packages("remotes")
+remotes::install_github("bbuchsbaum/eco-oracle")
+library(ecooracle)
+ecooracle::use_ecooracle()
+
+# later, refresh an existing repo to the latest templates
+ecooracle::use_ecooracle(overwrite = TRUE)
+```
+
 Or manually:
 1. Create `.ecosystem.yml` (see template below)
 2. Copy `tools/` files from this repo

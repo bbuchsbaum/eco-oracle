@@ -37,6 +37,20 @@ Fastest path with an agent:
 - ask: `Add this package to the ecosystem`
 - if `eco-join` skill is available, it scaffolds the required files/workflow.
 
+Fastest path from R:
+
+```r
+# install.packages("remotes")
+remotes::install_github("bbuchsbaum/eco-oracle")
+library(ecooracle)
+
+# initial scaffold
+ecooracle::use_ecooracle()
+
+# refresh workflow/tool templates later without hand edits
+ecooracle::use_ecooracle(overwrite = TRUE)
+```
+
 1. Add `.ecosystem.yml` at repo root:
 
 ```yaml
@@ -57,6 +71,8 @@ asset: atlas-pack.tgz
 - copy `tools/eco_atlas_extract.R`
 - copy `tools/eco_atlas_distill.mjs`
 - copy `.github/workflows/eco-atlas.yml` from `tools/eco-atlas.yml`
+
+If you use `ecooracle::use_ecooracle()`, these files are scaffolded for you. Re-run it with `overwrite = TRUE` to refresh an existing package to the current template set.
 
 3. Configure package secrets:
 - `OPENAI_API_KEY` for distillation step

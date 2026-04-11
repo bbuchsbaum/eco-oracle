@@ -36,7 +36,21 @@ This system is multi-tenant:
 
 ### Quick Start (Recommended)
 
-From your R package repo root, run the bootstrap script:
+From R inside the target package repo:
+
+```r
+# install.packages("remotes")
+remotes::install_github("bbuchsbaum/eco-oracle")
+library(ecooracle)
+
+# scaffold initial files
+ecooracle::use_ecooracle()
+
+# refresh an existing repo to the latest templates
+ecooracle::use_ecooracle(overwrite = TRUE)
+```
+
+Or from a shell, run the bootstrap script:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bbuchsbaum/eco-registry/main/scripts/bootstrap-package.sh | bash

@@ -1,0 +1,17 @@
+^\.beads$
+^\.github$
+^\.omc$
+^AGENTS\.md$
+^CLAUDE\.md$
+^atlas$
+^atlas-pack\.tgz$
+^dist$
+^docs$
+^eco-registry$
+^node_modules$
+^package-lock\.json$
+^package\.json$
+^packages$
+^schemas$
+^tools$
+

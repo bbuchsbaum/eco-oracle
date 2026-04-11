@@ -1,0 +1,14 @@
+Package: ecooracle
+Title: Bootstrap EcoOracle Support for R Packages
+Version: 0.0.0.9000
+Authors@R:
+    person("Brad", "Buchsbaum", email = "brad.buchsbaum@gmail.com", role = c("aut", "cre"))
+Description: Provides a small R helper for onboarding R packages into the
+    EcoOracle ecosystem. The package exposes use_ecooracle(), which wraps the
+    canonical bootstrap script to scaffold '.ecosystem.yml', workflow files,
+    and EcoAtlas tools into a package repository.
+License: MIT + file LICENSE
+Encoding: UTF-8
+RoxygenNote: 7.3.2
+SystemRequirements: bash
+

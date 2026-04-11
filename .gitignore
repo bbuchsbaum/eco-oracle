@@ -3,5 +3,6 @@ dist/
 atlas/
 atlas-pack.tgz
 *.tgz
+ecooracle_*.tar.gz
 .env
 .omc/
