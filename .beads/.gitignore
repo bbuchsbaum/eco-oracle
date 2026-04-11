@@ -7,5 +7,6 @@
 *.lock
 
 # Temporary
+.br_history/
 last-touched
 *.tmp

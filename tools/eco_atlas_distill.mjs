@@ -120,6 +120,56 @@ function parseBooleanEnv(raw, fallback) {
   return v === "1" || v === "true" || v === "yes";
 }
 
+class OpenAIRequestError extends Error {
+  constructor(message, { status = null, fatal = false } = {}) {
+    super(message);
+    this.name = "OpenAIRequestError";
+    this.status = status;
+    this.fatal = fatal;
+  }
+}
+
+function truncateForLog(text, maxChars = 240) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  return normalized.length <= maxChars
+    ? normalized
+    : normalized.slice(0, maxChars - 1) + "…";
+}
+
+function safeOpenAIErrorText(rawBody) {
+  const text = String(rawBody || "").trim();
+  if (!text) return "";
+  try {
+    const parsed = JSON.parse(text);
+    const err = parsed && typeof parsed === "object" ? parsed.error : null;
+    const detail = [err?.message, err?.type, err?.code].filter(Boolean).join(" | ");
+    return truncateForLog(detail);
+  } catch {
+    return truncateForLog(text);
+  }
+}
+
+function buildOpenAIRequestError(status, rawBody) {
+  if (status === 401) {
+    return new OpenAIRequestError(
+      "OpenAI authentication failed (401). Verify OPENAI_API_KEY and rotate the configured secret if needed.",
+      { status, fatal: true }
+    );
+  }
+  if (status === 403) {
+    return new OpenAIRequestError(
+      "OpenAI request forbidden (403). Check key scope plus project, org, and model permissions.",
+      { status, fatal: true }
+    );
+  }
+  const detail = safeOpenAIErrorText(rawBody);
+  return new OpenAIRequestError(
+    detail ? `OpenAI error ${status}: ${detail}` : `OpenAI error ${status}.`,
+    { status }
+  );
+}
+
 function parseNamespaceExports(nsPath) {
   if (!fs.existsSync(nsPath)) return [];
   const raw = fs.readFileSync(nsPath, "utf8");
@@ -373,7 +423,10 @@ async function callOpenAI({ instructions, input }) {
     })
   });
 
-  if (!res.ok) { const t = await res.text(); throw new Error(`OpenAI error ${res.status}: ${t}`); }
+  if (!res.ok) {
+    const rawBody = await res.text();
+    throw buildOpenAIRequestError(res.status, rawBody);
+  }
   return res.json();
 }
 
@@ -386,6 +439,7 @@ function normalizeAllowedSymbols(snippet) {
 }
 
 let requests = 0;
+let fatalError = null;
 
 for (const snip of snippets) {
   if (!INCLUDE_TEST_CARDS && snip.kind === "testthat") {
@@ -465,6 +519,11 @@ ${snip.code}`;
     requests += 1;
     console.error(`Distilled ${cleaned.length} card(s) from ${snip.id}`);
   } catch (e) {
+    if (e instanceof OpenAIRequestError && e.fatal) {
+      fatalError = e;
+      console.error(`Aborting distill run at ${snip.id}: ${e.message}`);
+      break;
+    }
     console.error(`Failed to distill ${snip.id}: ${e.message}`);
     cache[snip.hash] = [];
     requests += 1;
@@ -472,6 +531,10 @@ ${snip.code}`;
 }
 
 saveCache(cache);
+
+if (fatalError) {
+  process.exit(1);
+}
 
 const allCards = [];
 for (const snip of snippets) {
