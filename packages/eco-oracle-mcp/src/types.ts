@@ -102,6 +102,24 @@ export interface AtlasPack {
   sources: SourceRecord[];
 }
 
+export interface PackageCounts {
+  cards: number;
+  symbols: number;
+  edges: number;
+  manual_cards: number;
+  generated_cards: number;
+}
+
+export interface EcoIndexSnapshot {
+  version: 1;
+  saved_at_ms: number;
+  registry: RegistryEntry[];
+  cards: MicrocardRecord[];
+  symbols: SymbolRecord[];
+  edges: EdgeRecord[];
+  sources: SourceRecord[];
+}
+
 export interface SearchFilters {
   package?: string;
   language?: "R" | "Python";

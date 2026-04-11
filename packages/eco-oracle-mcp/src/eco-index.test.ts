@@ -200,4 +200,29 @@ describe("EcoIndex source ingestion and lookup", () => {
       expect(index.stats().sources).toBe(3);
     });
   });
+
+  describe("snapshot round-trip", () => {
+    it("restores stats, symbol lookup, source lookup, and package summaries", () => {
+      const snapshot = index.exportSnapshot();
+      const restored = new EcoIndex();
+
+      restored.loadSnapshot(snapshot);
+
+      expect(restored.stats()).toEqual(index.stats());
+      expect(restored.lookupSource("testpkg::compute").exact?.internal_calls).toEqual([
+        "stats::optim",
+        "testpkg:::helper",
+      ]);
+      expect(restored.lookupSymbol("testpkg::compute").exact?.signature).toBe(
+        'compute(x, method = "default")'
+      );
+
+      const summaries = restored.packageSummaries();
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0].package).toBe("testpkg");
+      expect(summaries[0].card_count).toBe(1);
+      expect(summaries[0].symbol_count).toBe(3);
+      expect(summaries[0].edge_count).toBe(0);
+    });
+  });
 });

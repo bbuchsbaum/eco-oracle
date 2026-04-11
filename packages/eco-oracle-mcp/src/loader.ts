@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import {
   mkdir,
@@ -13,6 +14,7 @@ import { extract } from "tar";
 import type {
   AtlasManifest,
   AtlasPack,
+  EcoIndexSnapshot,
   EdgeRecord,
   MicrocardRecord,
   RegistryEntry,
@@ -31,6 +33,7 @@ const GITHUB_TOKEN = process.env.ECO_GITHUB_TOKEN || "";
 
 const DEFAULT_RELEASE_TAG = "eco-atlas";
 const DEFAULT_ASSET_NAME = "atlas-pack.tgz";
+const SNAPSHOT_VERSION = 1;
 
 type RegistryDoc = RegistryEntry[] | { packages: RegistryEntry[] };
 
@@ -108,6 +111,79 @@ export async function loadAtlasPack(
   }
 }
 
+export async function loadIndexSnapshot(options: {
+  url?: string;
+  path?: string;
+  maxAgeSecs?: number;
+} = {}): Promise<EcoIndexSnapshot | null> {
+  const snapshotFile = getSnapshotPath(options);
+  if (!snapshotFile || !fs.existsSync(snapshotFile)) return null;
+
+  try {
+    const snapshotStat = await stat(snapshotFile);
+    const maxAgeSecs = options.maxAgeSecs ?? REFRESH_SECS;
+    if (maxAgeSecs > 0 && Date.now() - snapshotStat.mtimeMs > maxAgeSecs * 1000) {
+      return null;
+    }
+
+    const registryPath = (options.path || "").trim();
+    if (registryPath && fs.existsSync(registryPath)) {
+      const registryStat = await stat(registryPath);
+      if (registryStat.mtimeMs > snapshotStat.mtimeMs) {
+        return null;
+      }
+    }
+
+    const raw = await readFile(snapshotFile, "utf-8");
+    const parsed = JSON.parse(raw) as Partial<EcoIndexSnapshot>;
+    if (
+      parsed.version !== SNAPSHOT_VERSION ||
+      typeof parsed.saved_at_ms !== "number" ||
+      !Array.isArray(parsed.registry) ||
+      !Array.isArray(parsed.cards) ||
+      !Array.isArray(parsed.symbols) ||
+      !Array.isArray(parsed.edges) ||
+      !Array.isArray(parsed.sources)
+    ) {
+      return null;
+    }
+
+    return {
+      version: SNAPSHOT_VERSION,
+      saved_at_ms: parsed.saved_at_ms,
+      registry: parsed.registry,
+      cards: parsed.cards,
+      symbols: parsed.symbols,
+      edges: parsed.edges,
+      sources: parsed.sources,
+    };
+  } catch (error) {
+    console.error("[loader] Failed to load eco-index snapshot:", error);
+    return null;
+  }
+}
+
+export async function saveIndexSnapshot(
+  snapshot: EcoIndexSnapshot,
+  options: { url?: string; path?: string } = {}
+): Promise<void> {
+  const snapshotFile = getSnapshotPath(options);
+  if (!snapshotFile) return;
+
+  await mkdir(join(CACHE_DIR, "snapshots"), { recursive: true });
+  await writeFile(
+    snapshotFile,
+    JSON.stringify(
+      {
+        ...snapshot,
+        version: SNAPSHOT_VERSION,
+      },
+      null,
+      2
+    )
+  );
+}
+
 async function shouldRefreshTgz(tgzPath: string, force: boolean): Promise<boolean> {
   if (force) return true;
   if (!fs.existsSync(tgzPath)) return true;
@@ -118,6 +194,20 @@ async function shouldRefreshTgz(tgzPath: string, force: boolean): Promise<boolea
   } catch {
     return true;
   }
+}
+
+function getSnapshotPath(options: { url?: string; path?: string }): string {
+  const key = snapshotKey(options);
+  if (!key) return "";
+  return join(CACHE_DIR, "snapshots", `${key}.json`);
+}
+
+function snapshotKey(options: { url?: string; path?: string }): string {
+  const registryPath = (options.path || "").trim();
+  const registryUrl = (options.url || "").trim();
+  const locator = registryPath ? `path:${registryPath}` : registryUrl ? `url:${registryUrl}` : "";
+  if (!locator) return "";
+  return createHash("sha1").update(locator).digest("hex");
 }
 
 async function downloadAtlasPack(entry: RegistryEntry, destPath: string): Promise<void> {

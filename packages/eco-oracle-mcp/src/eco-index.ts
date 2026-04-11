@@ -1,7 +1,9 @@
 import type {
   AtlasPack,
   EdgeRecord,
+  EcoIndexSnapshot,
   MicrocardRecord,
+  PackageCounts,
   RegistryEntry,
   SearchFilters,
   SearchHit,
@@ -11,14 +13,6 @@ import type {
   SymbolRecord,
 } from "./types.js";
 import { loadAtlasPack } from "./loader.js";
-
-type PackageCounts = {
-  cards: number;
-  symbols: number;
-  edges: number;
-  manual_cards: number;
-  generated_cards: number;
-};
 
 export class EcoIndex {
   private cards: MicrocardRecord[] = [];
@@ -30,7 +24,12 @@ export class EcoIndex {
   private packageCounts: Map<string, PackageCounts> = new Map();
 
   hasData(): boolean {
-    return this.cards.length > 0 || this.symbols.size > 0 || this.edges.length > 0;
+    return (
+      this.packageMeta.size > 0 ||
+      this.cards.length > 0 ||
+      this.symbols.size > 0 ||
+      this.edges.length > 0
+    );
   }
 
   stats(): { packages: number; cards: number; symbols: number; sources: number; edges: number } {
@@ -47,25 +46,13 @@ export class EcoIndex {
     registry: RegistryEntry[],
     options: { force?: boolean } = {}
   ): Promise<void> {
-    const normalizedRegistry = registry.map((entry) => {
-      const pkg = inferPackage(entry);
-      return {
-        ...entry,
-        package: pkg,
-      };
-    });
+    const normalizedRegistry = normalizeRegistryEntries(registry);
 
     const packs = await Promise.allSettled(
       normalizedRegistry.map((entry) => loadAtlasPack(entry, { force: Boolean(options.force) }))
     );
 
-    this.cards = [];
-    this.symbols = new Map();
-    this.sources = new Map();
-    this.edges = [];
-    this.registry = normalizedRegistry;
-    this.packageMeta = new Map();
-    this.packageCounts = new Map();
+    this.reset(normalizedRegistry);
 
     for (let i = 0; i < packs.length; i++) {
       const result = packs[i];
@@ -90,6 +77,92 @@ export class EcoIndex {
 
     console.error(
       `[eco-index] Loaded ${this.cards.length} cards, ${this.symbols.size} symbols, ${this.edges.length} edges across ${this.packageMeta.size} packages`
+    );
+  }
+
+  exportSnapshot(): EcoIndexSnapshot {
+    return {
+      version: 1,
+      saved_at_ms: Date.now(),
+      registry: this.registry.map((entry) => ({ ...entry })),
+      cards: this.cards.map((card) => ({ ...card, sources: [...card.sources] })),
+      symbols: [...this.symbols.values()].map((symbol) => ({ ...symbol })),
+      edges: this.edges.map((edge) => ({ ...edge })),
+      sources: [...this.sources.values()].map((source) => ({ ...source })),
+    };
+  }
+
+  loadSnapshot(snapshot: EcoIndexSnapshot): void {
+    if (!snapshot || snapshot.version !== 1) {
+      throw new Error("Unsupported eco-index snapshot version.");
+    }
+
+    const normalizedRegistry = normalizeRegistryEntries(snapshot.registry || []);
+    this.reset(normalizedRegistry);
+
+    for (const raw of snapshot.cards || []) {
+      const pkg = String(raw.package || "").trim();
+      if (!pkg) continue;
+      const entry = this.ensurePackageMetadata(
+        pkg,
+        normalizeLanguage(raw.language || this.packageMeta.get(pkg)?.language)
+      );
+      const card = normalizeCard(
+        raw,
+        entry.package || pkg,
+        normalizeLanguage(entry.language || raw.language)
+      );
+      if (!card) continue;
+      this.cards.push(card);
+    }
+
+    for (const raw of snapshot.symbols || []) {
+      const pkg = inferPackageFromSymbol(raw.symbol);
+      if (!pkg) continue;
+      const entry = this.ensurePackageMetadata(
+        pkg,
+        normalizeLanguage(raw.language || this.packageMeta.get(pkg)?.language)
+      );
+      const symbol = normalizeSymbol(
+        raw,
+        entry.package || pkg,
+        normalizeLanguage(entry.language || raw.language)
+      );
+      if (!symbol) continue;
+      this.symbols.set(symbol.symbol, symbol);
+    }
+
+    for (const raw of snapshot.edges || []) {
+      const pkg = inferPackageFromEdge(raw);
+      const entry = pkg
+        ? this.ensurePackageMetadata(pkg, normalizeLanguage())
+        : null;
+      const edge = normalizeEdge(raw, entry?.package || pkg || "unknownpkg");
+      if (!edge) continue;
+      this.edges.push(edge);
+    }
+
+    for (const raw of snapshot.sources || []) {
+      const pkg = inferPackageFromSymbol(raw.symbol);
+      if (!pkg || !raw.body) continue;
+      const entry = this.ensurePackageMetadata(
+        pkg,
+        normalizeLanguage(raw.language || this.packageMeta.get(pkg)?.language)
+      );
+      const symbolText = String(raw.symbol);
+      const symbol = symbolText.includes("::")
+        ? symbolText
+        : `${entry.package || pkg}::${symbolText}`;
+      this.sources.set(symbol, {
+        ...raw,
+        symbol,
+        language: raw.language || entry.language || "R",
+      });
+    }
+
+    this.packageCounts = buildPackageCounts(this.cards, this.symbols, this.edges, this.packageMeta);
+    console.error(
+      `[eco-index] Restored ${this.cards.length} cards, ${this.symbols.size} symbols, ${this.edges.length} edges across ${this.packageMeta.size} packages from snapshot`
     );
   }
 
@@ -146,6 +219,38 @@ export class EcoIndex {
     }
 
     this.packageCounts.set(pkg, counts);
+  }
+
+  private reset(registry: RegistryEntry[]): void {
+    this.cards = [];
+    this.symbols = new Map();
+    this.sources = new Map();
+    this.edges = [];
+    this.registry = [...registry];
+    this.packageMeta = new Map(
+      registry.map((entry) => {
+        const pkg = entry.package || inferPackage(entry);
+        return [pkg, entry];
+      })
+    );
+    this.packageCounts = buildPackageCounts(this.cards, this.symbols, this.edges, this.packageMeta);
+  }
+
+  private ensurePackageMetadata(
+    pkg: string,
+    language: "R" | "Python" = "R"
+  ): RegistryEntry {
+    const existing = this.packageMeta.get(pkg);
+    if (existing) return existing;
+
+    const placeholder: RegistryEntry = {
+      repo: pkg,
+      package: pkg,
+      language,
+    };
+    this.packageMeta.set(pkg, placeholder);
+    this.registry.push(placeholder);
+    return placeholder;
   }
 
   searchCards(
@@ -493,6 +598,16 @@ function normalizeCard(
   };
 }
 
+function normalizeRegistryEntries(registry: RegistryEntry[]): RegistryEntry[] {
+  return registry.map((entry) => {
+    const pkg = inferPackage(entry);
+    return {
+      ...entry,
+      package: pkg,
+    };
+  });
+}
+
 function normalizeCardKind(
   raw: MicrocardRecord,
   sources: SourceRef[]
@@ -582,6 +697,75 @@ function normalizeSource(source: unknown): SourceRef {
   }
 
   return { path, lines: [1, 1] };
+}
+
+function normalizeLanguage(value?: unknown): "R" | "Python" {
+  return value === "Python" ? "Python" : "R";
+}
+
+function inferPackageFromSymbol(symbol: unknown): string {
+  const text = String(symbol || "").trim();
+  if (!text) return "";
+  const [pkg] = text.split("::");
+  return pkg || "";
+}
+
+function inferPackageFromEdge(edge: EdgeRecord): string {
+  const from = String(edge.from || "").trim();
+  if (from.includes("::")) return from.split("::")[0] || "";
+  const legacy = String(edge.from_package || "").trim();
+  return legacy || "";
+}
+
+function buildPackageCounts(
+  cards: MicrocardRecord[],
+  symbols: Map<string, SymbolRecord>,
+  edges: EdgeRecord[],
+  packageMeta: Map<string, RegistryEntry>
+): Map<string, PackageCounts> {
+  const counts = new Map<string, PackageCounts>();
+
+  const ensureCounts = (pkg: string): PackageCounts => {
+    const key = pkg.trim();
+    if (!counts.has(key)) {
+      counts.set(key, {
+        cards: 0,
+        symbols: 0,
+        edges: 0,
+        manual_cards: 0,
+        generated_cards: 0,
+      });
+    }
+    return counts.get(key)!;
+  };
+
+  for (const pkg of packageMeta.keys()) {
+    ensureCounts(pkg);
+  }
+
+  for (const card of cards) {
+    const pkgCounts = ensureCounts(card.package);
+    pkgCounts.cards += 1;
+    if (String(card.kind || "").toLowerCase() === "manual") {
+      pkgCounts.manual_cards += 1;
+    } else {
+      pkgCounts.generated_cards += 1;
+    }
+  }
+
+  for (const symbol of symbols.values()) {
+    const pkg = inferPackageFromSymbol(symbol.symbol);
+    if (!pkg) continue;
+    ensureCounts(pkg).symbols += 1;
+  }
+
+  for (const edge of edges) {
+    const pkg = inferPackageFromEdge(edge);
+    if (!pkg) continue;
+    ensureCounts(pkg).edges += 1;
+  }
+
+  return counts;
 }
 
 function normalizeSources(sources: unknown): SourceRef[] {

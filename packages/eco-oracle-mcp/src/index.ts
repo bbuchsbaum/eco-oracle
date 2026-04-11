@@ -6,7 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { EcoIndex } from "./eco-index.js";
-import { loadRegistry } from "./loader.js";
+import { loadIndexSnapshot, loadRegistry, saveIndexSnapshot } from "./loader.js";
 
 const DEFAULT_LOCAL_REGISTRY = path.resolve(
   process.cwd(),
@@ -43,13 +43,36 @@ async function ensureFresh(force = false): Promise<void> {
 
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
+      if (!force && !index.hasData()) {
+        const snapshot = await loadIndexSnapshot({
+          url: REGISTRY_URL,
+          path: REGISTRY_PATH,
+          maxAgeSecs: REFRESH_SECS,
+        });
+
+        if (snapshot) {
+          index.loadSnapshot(snapshot);
+          lastRefreshMs = snapshot.saved_at_ms;
+          return;
+        }
+      }
+
       const registry = await loadRegistry({
         url: REGISTRY_URL,
         path: REGISTRY_PATH,
       });
 
       await index.loadFromRegistry(registry, { force });
-      lastRefreshMs = Date.now();
+      const snapshot = index.exportSnapshot();
+      lastRefreshMs = snapshot.saved_at_ms;
+      try {
+        await saveIndexSnapshot(snapshot, {
+          url: REGISTRY_URL,
+          path: REGISTRY_PATH,
+        });
+      } catch (error) {
+        console.error("[eco-oracle] Failed to persist snapshot:", error);
+      }
     })().finally(() => {
       refreshInFlight = null;
     });
