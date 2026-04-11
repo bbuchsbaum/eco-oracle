@@ -98,15 +98,29 @@ extract_roxygen_summary <- function(file_lines, func_start_line) {
   NULL
 }
 
+format_formal_arg <- function(name, default) {
+  if (!nzchar(name) || identical(name, "...")) return("...")
+  if (identical(default, quote(expr = ))) return(name)
+
+  rhs <- paste(deparse(default, width.cutoff = 500L), collapse = " ")
+  rhs <- gsub("\\s+", " ", rhs)
+  sprintf("%s = %s", name, rhs)
+}
+
 pairlist_to_signature <- function(fn_call) {
   if (!is.call(fn_call)) return(NULL)
   fn_head <- tryCatch(as.character(fn_call[[1]])[[1]], error = function(e) "")
   if (!identical(fn_head, "function")) return(NULL)
   args <- fn_call[[2]]
-  args_str <- paste(deparse(args), collapse = " ")
-  args_str <- sub("^pairlist\\(", "", args_str)
-  args_str <- sub("\\)$", "", args_str)
-  args_str
+  if (!is.pairlist(args)) return(NULL)
+
+  arg_names <- names(args) %||% rep("", length(args))
+  parts <- vapply(
+    seq_along(args),
+    function(idx) format_formal_arg(arg_names[[idx]] %||% "", args[[idx]]),
+    character(1)
+  )
+  paste(parts, collapse = ", ")
 }
 
 find_assignment_start_line <- function(file_lines, nm) {
@@ -174,9 +188,7 @@ collect_r_defs <- function(r_files) {
       }
 
       sig_args <- pairlist_to_signature(rhs)
-      sig_raw <- if (!is.null(sig_args)) paste0(nm, "(", sig_args, ")") else paste0(nm, "(...)")
-      sig <- gsub("as\\.pairlist\\(alist\\(|\\)\\)$", "", sig_raw)
-      sig <- gsub("\\)$", ")", sig)
+      sig <- if (!is.null(sig_args)) paste0(nm, "(", sig_args, ")") else paste0(nm, "(...)")
 
       summary <- if (!is.na(start_line)) extract_roxygen_summary(file_lines, start_line) else NULL
 
