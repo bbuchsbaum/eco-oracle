@@ -7,6 +7,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { EcoIndex } from "./eco-index.js";
 import { loadIndexSnapshot, loadRegistry, saveIndexSnapshot } from "./loader.js";
+import {
+  buildPackagePayload,
+  buildRegistryPackageRows,
+  type PackageFilters,
+} from "./package-listing.js";
+import type { RegistryEntry } from "./types.js";
 
 const DEFAULT_LOCAL_REGISTRY = path.resolve(
   process.cwd(),
@@ -30,6 +36,9 @@ const REFRESH_SECS =
 
 let lastRefreshMs = 0;
 let refreshInFlight: Promise<void> | null = null;
+let lastRegistryRefreshMs = 0;
+let registryRefreshInFlight: Promise<RegistryEntry[]> | null = null;
+let registryCache: RegistryEntry[] = [];
 
 const index = new EcoIndex();
 
@@ -43,28 +52,16 @@ async function ensureFresh(force = false): Promise<void> {
 
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
-      if (!force && !index.hasData()) {
-        const snapshot = await loadIndexSnapshot({
-          url: REGISTRY_URL,
-          path: REGISTRY_PATH,
-          maxAgeSecs: REFRESH_SECS,
-        });
-
-        if (snapshot) {
-          index.loadSnapshot(snapshot);
-          lastRefreshMs = snapshot.saved_at_ms;
-          return;
-        }
+      if (!force && !index.hasData() && (await hydrateIndexFromSnapshot())) {
+        return;
       }
 
-      const registry = await loadRegistry({
-        url: REGISTRY_URL,
-        path: REGISTRY_PATH,
-      });
+      const registry = await ensureRegistryFresh(force);
 
       await index.loadFromRegistry(registry, { force });
       const snapshot = index.exportSnapshot();
       lastRefreshMs = snapshot.saved_at_ms;
+      setRegistryCache(snapshot.registry, snapshot.saved_at_ms);
       try {
         await saveIndexSnapshot(snapshot, {
           url: REGISTRY_URL,
@@ -79,6 +76,50 @@ async function ensureFresh(force = false): Promise<void> {
   }
 
   await refreshInFlight;
+}
+
+async function ensureRegistryFresh(force = false): Promise<RegistryEntry[]> {
+  const now = Date.now();
+  if (!force && registryCache.length > 0 && now - lastRegistryRefreshMs < REFRESH_SECS * 1000) {
+    return registryCache;
+  }
+
+  if (!registryRefreshInFlight) {
+    registryRefreshInFlight = (async () => {
+      const registry = await loadRegistry({
+        url: REGISTRY_URL,
+        path: REGISTRY_PATH,
+      });
+      setRegistryCache(registry);
+      return registryCache;
+    })().finally(() => {
+      registryRefreshInFlight = null;
+    });
+  }
+
+  return registryRefreshInFlight;
+}
+
+async function hydrateIndexFromSnapshot(): Promise<boolean> {
+  if (index.hasData()) return true;
+
+  const snapshot = await loadIndexSnapshot({
+    url: REGISTRY_URL,
+    path: REGISTRY_PATH,
+    maxAgeSecs: REFRESH_SECS,
+  });
+
+  if (!snapshot) return false;
+
+  index.loadSnapshot(snapshot);
+  lastRefreshMs = snapshot.saved_at_ms;
+  setRegistryCache(snapshot.registry, snapshot.saved_at_ms);
+  return true;
+}
+
+function setRegistryCache(registry: RegistryEntry[], refreshedAtMs = Date.now()): void {
+  registryCache = registry.map((entry) => ({ ...entry }));
+  lastRegistryRefreshMs = refreshedAtMs;
 }
 
 server.registerTool(
@@ -284,52 +325,21 @@ server.registerTool(
     },
   },
   async ({ language, tags, role, refresh }) => {
-    await ensureFresh(Boolean(refresh));
+    const filters: PackageFilters = { language, tags, role };
 
-    const packages = index.packageSummaries({ language, tags, role });
-    const totals = packages.reduce(
-      (acc, pkg) => {
-        acc.packages += 1;
-        acc.cards += pkg.card_count || 0;
-        acc.symbols += pkg.symbol_count || 0;
-        acc.edges += pkg.edge_count || 0;
-        acc.manual_cards += pkg.manual_card_count || 0;
-        acc.generated_cards += pkg.generated_card_count || 0;
-        return acc;
-      },
-      {
-        packages: 0,
-        cards: 0,
-        symbols: 0,
-        edges: 0,
-        manual_cards: 0,
-        generated_cards: 0,
+    let payload;
+    if (refresh) {
+      await ensureFresh(true);
+      payload = buildPackagePayload(index.packageSummaries(filters), filters, true);
+    } else {
+      await hydrateIndexFromSnapshot();
+      if (index.hasData()) {
+        payload = buildPackagePayload(index.packageSummaries(filters), filters, true);
+      } else {
+        const registry = await ensureRegistryFresh(false);
+        payload = buildPackagePayload(buildRegistryPackageRows(registry, filters), filters, false);
       }
-    );
-
-    const totalsWithRatio = {
-      ...totals,
-      manual_ratio:
-        totals.cards > 0 ? Number((totals.manual_cards / totals.cards).toFixed(4)) : 0,
-    };
-
-    const packagesWithRatio = packages.map((pkg) => ({
-      ...pkg,
-      manual_ratio:
-        (pkg.card_count || 0) > 0
-          ? Number(((pkg.manual_card_count || 0) / (pkg.card_count || 0)).toFixed(4))
-          : 0,
-    }));
-
-    const payload = {
-      totals: totalsWithRatio,
-      filters: {
-        language: language || null,
-        tags: tags || [],
-        role: role || null,
-      },
-      packages: packagesWithRatio,
-    };
+    }
 
     return {
       content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
@@ -454,10 +464,12 @@ server.registerTool(
 
 async function main() {
   try {
-    await ensureFresh(false);
+    if (!(await hydrateIndexFromSnapshot())) {
+      await ensureRegistryFresh(false);
+    }
   } catch (err) {
     console.error(
-      "[eco-oracle] Startup refresh failed (server will still run and retry on tool call):",
+      "[eco-oracle] Startup warmup failed (server will still run and retry on tool call):",
       err
     );
   }
@@ -465,6 +477,12 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("[eco-oracle] MCP server running on stdio");
+
+  if (!index.hasData()) {
+    void ensureFresh(false).catch((err) => {
+      console.error("[eco-oracle] Background refresh failed:", err);
+    });
+  }
 }
 
 main().catch((err) => {
