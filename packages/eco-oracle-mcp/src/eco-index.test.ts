@@ -1,6 +1,12 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+vi.mock("./loader.js", () => ({
+  loadAtlasPack: vi.fn(),
+}));
 import { EcoIndex } from "./eco-index.js";
+import { loadAtlasPack } from "./loader.js";
 import type { AtlasPack, SourceRecord, SymbolRecord, MicrocardRecord } from "./types.js";
+
+const mockedLoadAtlasPack = vi.mocked(loadAtlasPack);
 
 function makePack(overrides: Partial<AtlasPack> = {}): AtlasPack {
   return {
@@ -52,6 +58,7 @@ describe("EcoIndex source ingestion and lookup", () => {
   let index: EcoIndex;
 
   beforeEach(async () => {
+    mockedLoadAtlasPack.mockReset();
     index = new EcoIndex();
 
     const pack = makePack({
@@ -223,6 +230,67 @@ describe("EcoIndex source ingestion and lookup", () => {
       expect(summaries[0].card_count).toBe(1);
       expect(summaries[0].symbol_count).toBe(3);
       expect(summaries[0].edge_count).toBe(0);
+    });
+  });
+
+  describe("partial package loading", () => {
+    it("loads only requested packages for exact package lookups", async () => {
+      const localIndex = new EcoIndex();
+      mockedLoadAtlasPack.mockResolvedValueOnce(
+        makePack({
+          manifest: { package: "pkg1", version: "1.0.0", language: "R" },
+          symbols: [makeSymbol("pkg1::alpha_exact", "alpha_exact(x)")],
+          sources: [makeSource("pkg1::alpha_exact", "function(x) x")],
+          cards: [
+            {
+              ...makeCard("pkg1::howto/alpha", "pkg1"),
+              q: "How do I alpha_exact?",
+              a: "Use alpha_exact.",
+              recipe: "pkg1::alpha_exact(x)",
+              symbols: ["pkg1::alpha_exact"],
+            },
+          ],
+        })
+      );
+
+      await localIndex.loadPackages([{ repo: "test/pkg1", package: "pkg1", language: "R" }]);
+
+      expect(mockedLoadAtlasPack).toHaveBeenCalledTimes(1);
+      expect(localIndex.isPackageLoaded("pkg1")).toBe(true);
+      expect(localIndex.loadedPackageCount()).toBe(1);
+      expect(localIndex.lookupSymbol("pkg1::alpha_exact").exact?.symbol).toBe("pkg1::alpha_exact");
+    });
+
+    it("force reloading a package replaces prior package data instead of duplicating it", async () => {
+      const localIndex = new EcoIndex();
+      mockedLoadAtlasPack
+        .mockResolvedValueOnce(
+          makePack({
+            manifest: { package: "pkg1", version: "1.0.0", language: "R" },
+            symbols: [makeSymbol("pkg1::old_exact_only", "old_exact_only(x)")],
+            sources: [makeSource("pkg1::old_exact_only", "function(x) x")],
+          })
+        )
+        .mockResolvedValueOnce(
+          makePack({
+            manifest: { package: "pkg1", version: "1.0.1", language: "R" },
+            symbols: [makeSymbol("pkg1::new_exact_only", "new_exact_only(x)")],
+            sources: [makeSource("pkg1::new_exact_only", "function(x) x + 1")],
+          })
+        );
+
+      await localIndex.loadPackages([{ repo: "test/pkg1", package: "pkg1", language: "R" }]);
+      await localIndex.loadPackages(
+        [{ repo: "test/pkg1", package: "pkg1", language: "R" }],
+        { force: true }
+      );
+
+      expect(mockedLoadAtlasPack).toHaveBeenCalledTimes(2);
+      expect(localIndex.lookupSymbol("pkg1::old_exact_only").exact).toBeUndefined();
+      expect(localIndex.lookupSymbol("pkg1::new_exact_only").exact?.symbol).toBe(
+        "pkg1::new_exact_only"
+      );
+      expect(localIndex.stats().symbols).toBe(1);
     });
   });
 });

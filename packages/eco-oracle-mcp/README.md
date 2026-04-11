@@ -61,6 +61,7 @@ The harness measures:
 - registry-only `eco_packages` cold path
 - snapshot hydrate + counted `eco_packages`
 - full pack refresh
+- targeted exact `pkg::fn` symbol lookup
 - warm `eco_packages`
 - warm symbol lookup
 - warm card search

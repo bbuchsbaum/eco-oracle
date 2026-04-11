@@ -31,7 +31,7 @@
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "bench": "npm run build && node --expose-gc dist/bench.js",
-    "test": "vitest run",
+    "test": "vitest run --dir src",
     "lint": "eslint src",
     "prepack": "npm run build"
   },

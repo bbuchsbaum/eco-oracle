@@ -114,6 +114,7 @@ export interface EcoIndexSnapshot {
   version: 1;
   saved_at_ms: number;
   registry: RegistryEntry[];
+  loaded_packages: string[];
   cards: MicrocardRecord[];
   symbols: SymbolRecord[];
   edges: EdgeRecord[];

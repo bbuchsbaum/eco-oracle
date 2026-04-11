@@ -22,6 +22,8 @@ export class EcoIndex {
   private registry: RegistryEntry[] = [];
   private packageMeta: Map<string, RegistryEntry> = new Map();
   private packageCounts: Map<string, PackageCounts> = new Map();
+  private loadedPackages: Set<string> = new Set();
+  private packageLoadedAtMs: Map<string, number> = new Map();
 
   hasData(): boolean {
     return (
@@ -48,36 +50,67 @@ export class EcoIndex {
   ): Promise<void> {
     const normalizedRegistry = normalizeRegistryEntries(registry);
 
-    const packs = await Promise.allSettled(
-      normalizedRegistry.map((entry) => loadAtlasPack(entry, { force: Boolean(options.force) }))
-    );
-
     this.reset(normalizedRegistry);
+    await this.loadPackages(normalizedRegistry, { force: Boolean(options.force) });
+
+    console.error(
+      `[eco-index] Loaded ${this.cards.length} cards, ${this.symbols.size} symbols, ${this.edges.length} edges across ${this.packageMeta.size} packages`
+    );
+  }
+
+  async loadPackages(
+    entries: RegistryEntry[],
+    options: { force?: boolean } = {}
+  ): Promise<void> {
+    const normalizedEntries = normalizeRegistryEntries(entries);
+
+    for (const entry of normalizedEntries) {
+      const pkg = entry.package || inferPackage(entry);
+      const existing = this.packageMeta.get(pkg);
+      if (!existing) {
+        this.registry.push(entry);
+      }
+      this.packageMeta.set(pkg, entry);
+      if (!this.packageCounts.has(pkg)) {
+        this.packageCounts.set(pkg, {
+          cards: 0,
+          symbols: 0,
+          edges: 0,
+          manual_cards: 0,
+          generated_cards: 0,
+        });
+      }
+    }
+
+    const force = Boolean(options.force);
+    const candidates = normalizedEntries.filter((entry) => {
+      const pkg = entry.package || inferPackage(entry);
+      return force || !this.isPackageLoaded(pkg);
+    });
+    if (candidates.length === 0) return;
+
+    const packs = await Promise.allSettled(
+      candidates.map((entry) => loadAtlasPack(entry, { force }))
+    );
 
     for (let i = 0; i < packs.length; i++) {
       const result = packs[i];
-      const entry = normalizedRegistry[i];
+      const entry = candidates[i];
       const pkg = entry.package || inferPackage(entry);
-      this.packageMeta.set(pkg, entry);
-      this.packageCounts.set(pkg, {
-        cards: 0,
-        symbols: 0,
-        edges: 0,
-        manual_cards: 0,
-        generated_cards: 0,
-      });
 
       if (result.status === "rejected") {
         console.error(`[eco-index] Failed to load pack ${entry.repo}:`, result.reason);
         continue;
       }
 
-      this.ingestPack(result.value, entry);
-    }
+      if (this.loadedPackages.has(pkg)) {
+        this.dropPackageData(pkg);
+      }
 
-    console.error(
-      `[eco-index] Loaded ${this.cards.length} cards, ${this.symbols.size} symbols, ${this.edges.length} edges across ${this.packageMeta.size} packages`
-    );
+      this.ingestPack(result.value, entry);
+      this.loadedPackages.add(pkg);
+      this.packageLoadedAtMs.set(pkg, Date.now());
+    }
   }
 
   exportSnapshot(): EcoIndexSnapshot {
@@ -85,6 +118,7 @@ export class EcoIndex {
       version: 1,
       saved_at_ms: Date.now(),
       registry: this.registry.map((entry) => ({ ...entry })),
+      loaded_packages: [...this.loadedPackages],
       cards: this.cards.map((card) => ({ ...card, sources: [...card.sources] })),
       symbols: [...this.symbols.values()].map((symbol) => ({ ...symbol })),
       edges: this.edges.map((edge) => ({ ...edge })),
@@ -99,6 +133,10 @@ export class EcoIndex {
 
     const normalizedRegistry = normalizeRegistryEntries(snapshot.registry || []);
     this.reset(normalizedRegistry);
+    const loadedPackages = normalizeLoadedPackages(
+      snapshot.loaded_packages,
+      normalizedRegistry
+    );
 
     for (const raw of snapshot.cards || []) {
       const pkg = String(raw.package || "").trim();
@@ -161,9 +199,26 @@ export class EcoIndex {
     }
 
     this.packageCounts = buildPackageCounts(this.cards, this.symbols, this.edges, this.packageMeta);
+    for (const pkg of loadedPackages) {
+      this.loadedPackages.add(pkg);
+      this.packageLoadedAtMs.set(pkg, snapshot.saved_at_ms);
+    }
     console.error(
       `[eco-index] Restored ${this.cards.length} cards, ${this.symbols.size} symbols, ${this.edges.length} edges across ${this.packageMeta.size} packages from snapshot`
     );
+  }
+
+  isPackageLoaded(pkg: string, maxAgeMs?: number): boolean {
+    const key = pkg.trim();
+    if (!this.loadedPackages.has(key)) return false;
+    if (typeof maxAgeMs !== "number" || maxAgeMs <= 0) return true;
+    const loadedAtMs = this.packageLoadedAtMs.get(key);
+    if (typeof loadedAtMs !== "number") return false;
+    return Date.now() - loadedAtMs <= maxAgeMs;
+  }
+
+  loadedPackageCount(): number {
+    return this.loadedPackages.size;
   }
 
   private ingestPack(pack: AtlasPack, entry: RegistryEntry): void {
@@ -234,6 +289,8 @@ export class EcoIndex {
       })
     );
     this.packageCounts = buildPackageCounts(this.cards, this.symbols, this.edges, this.packageMeta);
+    this.loadedPackages = new Set();
+    this.packageLoadedAtMs = new Map();
   }
 
   private ensurePackageMetadata(
@@ -251,6 +308,27 @@ export class EcoIndex {
     this.packageMeta.set(pkg, placeholder);
     this.registry.push(placeholder);
     return placeholder;
+  }
+
+  private dropPackageData(pkg: string): void {
+    this.cards = this.cards.filter((card) => card.package !== pkg);
+
+    for (const symbol of [...this.symbols.keys()]) {
+      if (inferPackageFromSymbol(symbol) === pkg) {
+        this.symbols.delete(symbol);
+      }
+    }
+
+    for (const symbol of [...this.sources.keys()]) {
+      if (inferPackageFromSymbol(symbol) === pkg) {
+        this.sources.delete(symbol);
+      }
+    }
+
+    this.edges = this.edges.filter((edge) => inferPackageFromEdge(edge) !== pkg);
+    this.loadedPackages.delete(pkg);
+    this.packageLoadedAtMs.delete(pkg);
+    this.packageCounts = buildPackageCounts(this.cards, this.symbols, this.edges, this.packageMeta);
   }
 
   searchCards(
@@ -606,6 +684,17 @@ function normalizeRegistryEntries(registry: RegistryEntry[]): RegistryEntry[] {
       package: pkg,
     };
   });
+}
+
+function normalizeLoadedPackages(
+  loadedPackages: unknown,
+  registry: RegistryEntry[]
+): string[] {
+  if (Array.isArray(loadedPackages)) {
+    const normalized = loadedPackages.map((pkg) => String(pkg).trim()).filter(Boolean);
+    if (normalized.length > 0) return normalized;
+  }
+  return registry.map((entry) => entry.package || inferPackage(entry));
 }
 
 function normalizeCardKind(

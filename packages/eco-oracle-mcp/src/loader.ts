@@ -152,6 +152,9 @@ export async function loadIndexSnapshot(options: {
       version: SNAPSHOT_VERSION,
       saved_at_ms: parsed.saved_at_ms,
       registry: parsed.registry,
+      loaded_packages: Array.isArray(parsed.loaded_packages)
+        ? parsed.loaded_packages.map((pkg) => String(pkg).trim()).filter(Boolean)
+        : [],
       cards: parsed.cards,
       symbols: parsed.symbols,
       edges: parsed.edges,

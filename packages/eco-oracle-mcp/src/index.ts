@@ -39,6 +39,7 @@ let refreshInFlight: Promise<void> | null = null;
 let lastRegistryRefreshMs = 0;
 let registryRefreshInFlight: Promise<RegistryEntry[]> | null = null;
 let registryCache: RegistryEntry[] = [];
+let fullIndexReady = false;
 
 const index = new EcoIndex();
 
@@ -46,7 +47,7 @@ const server = new McpServer({ name: "eco-oracle", version: "0.2.0" });
 
 async function ensureFresh(force = false): Promise<void> {
   const now = Date.now();
-  if (!force && index.hasData() && now - lastRefreshMs < REFRESH_SECS * 1000) {
+  if (!force && hasCompleteIndexCoverage() && now - lastRefreshMs < REFRESH_SECS * 1000) {
     return;
   }
 
@@ -59,17 +60,8 @@ async function ensureFresh(force = false): Promise<void> {
       const registry = await ensureRegistryFresh(force);
 
       await index.loadFromRegistry(registry, { force });
-      const snapshot = index.exportSnapshot();
-      lastRefreshMs = snapshot.saved_at_ms;
-      setRegistryCache(snapshot.registry, snapshot.saved_at_ms);
-      try {
-        await saveIndexSnapshot(snapshot, {
-          url: REGISTRY_URL,
-          path: REGISTRY_PATH,
-        });
-      } catch (error) {
-        console.error("[eco-oracle] Failed to persist snapshot:", error);
-      }
+      fullIndexReady = index.loadedPackageCount() >= registry.length;
+      await persistCompleteSnapshot();
     })().finally(() => {
       refreshInFlight = null;
     });
@@ -112,14 +104,86 @@ async function hydrateIndexFromSnapshot(): Promise<boolean> {
   if (!snapshot) return false;
 
   index.loadSnapshot(snapshot);
-  lastRefreshMs = snapshot.saved_at_ms;
   setRegistryCache(snapshot.registry, snapshot.saved_at_ms);
+  fullIndexReady = index.loadedPackageCount() >= registryCache.length;
+  if (fullIndexReady) {
+    lastRefreshMs = snapshot.saved_at_ms;
+  }
   return true;
 }
 
 function setRegistryCache(registry: RegistryEntry[], refreshedAtMs = Date.now()): void {
   registryCache = registry.map((entry) => ({ ...entry }));
   lastRegistryRefreshMs = refreshedAtMs;
+}
+
+function hasCompleteIndexCoverage(): boolean {
+  return fullIndexReady && registryCache.length > 0 && index.loadedPackageCount() >= registryCache.length;
+}
+
+async function ensurePackagesLoaded(packages: string[]): Promise<void> {
+  const requested = [...new Set(packages.map((pkg) => pkg.trim()).filter(Boolean))];
+  if (requested.length === 0) return;
+
+  const registry = await ensureRegistryFresh(false);
+  const requestedSet = new Set(requested);
+  const entries = registry.filter((entry) => {
+    const pkg = String(entry.package || inferPackageFromRepo(entry.repo)).trim();
+    return requestedSet.has(pkg);
+  });
+  if (entries.length === 0) return;
+
+  const missing = entries.filter((entry) => {
+    const pkg = String(entry.package || inferPackageFromRepo(entry.repo)).trim();
+    return !index.isPackageLoaded(pkg);
+  });
+  const stale = entries.filter((entry) => {
+    const pkg = String(entry.package || inferPackageFromRepo(entry.repo)).trim();
+    return index.isPackageLoaded(pkg) && !index.isPackageLoaded(pkg, REFRESH_SECS * 1000);
+  });
+
+  if (missing.length > 0) {
+    await index.loadPackages(missing, { force: false });
+  }
+  if (stale.length > 0) {
+    await index.loadPackages(stale, { force: true });
+  }
+
+  fullIndexReady = index.loadedPackageCount() >= registryCache.length && registryCache.length > 0;
+  await persistCompleteSnapshot();
+}
+
+async function persistCompleteSnapshot(): Promise<void> {
+  if (!hasCompleteIndexCoverage()) return;
+  const snapshot = index.exportSnapshot();
+  lastRefreshMs = snapshot.saved_at_ms;
+  setRegistryCache(snapshot.registry, snapshot.saved_at_ms);
+  try {
+    await saveIndexSnapshot(snapshot, {
+      url: REGISTRY_URL,
+      path: REGISTRY_PATH,
+    });
+  } catch (error) {
+    console.error("[eco-oracle] Failed to persist snapshot:", error);
+  }
+}
+
+async function ensureQualifiedSymbolScope(
+  symbol: string,
+  refresh: boolean
+): Promise<void> {
+  if (refresh) {
+    await ensureFresh(true);
+    return;
+  }
+
+  const pkg = extractQualifiedPackage(symbol);
+  if (pkg) {
+    await ensurePackagesLoaded([pkg]);
+    return;
+  }
+
+  await ensureFresh(false);
 }
 
 server.registerTool(
@@ -161,7 +225,6 @@ server.registerTool(
     include_symbol_fallback,
     refresh,
   }) => {
-    await ensureFresh(Boolean(refresh));
     const requestedTopK = top_k ?? 5;
 
     const mergedFilters = {
@@ -171,6 +234,26 @@ server.registerTool(
       role: role ?? filters?.role,
     };
 
+    let routeCandidates: RouteCandidate[] = [];
+    if (refresh) {
+      await ensureFresh(true);
+    } else if (mergedFilters.package) {
+      await ensurePackagesLoaded([mergedFilters.package]);
+    } else {
+      await hydrateIndexFromSnapshot();
+      if (!hasCompleteIndexCoverage()) {
+        const registry = await ensureRegistryFresh(false);
+        routeCandidates = rankPackageRoutes(
+          query,
+          buildRegistryPackageRows(registry, mergedFilters),
+          3
+        );
+        await ensurePackagesLoaded(routeCandidates.map((candidate) => candidate.package));
+      } else {
+        await ensureFresh(false);
+      }
+    }
+
     let hits = index.searchCards(query, requestedTopK, mergedFilters);
     let packageRouting: {
       attempted: boolean;
@@ -179,15 +262,16 @@ server.registerTool(
     } | null = null;
 
     if (hits.length === 0 && !mergedFilters.package) {
-      const routeCandidates = rankPackageRoutes(
-        query,
-        index.listPackages({
-          language: mergedFilters.language,
-          tags: mergedFilters.tags,
-          role: mergedFilters.role,
-        }),
-        3
-      );
+      if (routeCandidates.length === 0) {
+        const routeSource = hasCompleteIndexCoverage()
+          ? index.listPackages({
+              language: mergedFilters.language,
+              tags: mergedFilters.tags,
+              role: mergedFilters.role,
+            })
+          : buildRegistryPackageRows(await ensureRegistryFresh(false), mergedFilters);
+        routeCandidates = rankPackageRoutes(query, routeSource, 3);
+      }
 
       packageRouting = {
         attempted: true,
@@ -196,6 +280,7 @@ server.registerTool(
       };
 
       for (const candidate of routeCandidates) {
+        await ensurePackagesLoaded([candidate.package]);
         const routedHits = index.searchCards(query, requestedTopK, {
           ...mergedFilters,
           package: candidate.package,
@@ -206,6 +291,11 @@ server.registerTool(
           break;
         }
       }
+
+      if (hits.length === 0 && !hasCompleteIndexCoverage()) {
+        await ensureFresh(false);
+        hits = index.searchCards(query, requestedTopK, mergedFilters);
+      }
     }
 
     const symbolFilters =
@@ -213,10 +303,21 @@ server.registerTool(
         ? { ...mergedFilters, package: packageRouting.selected_package }
         : mergedFilters;
     const shouldFallback = include_symbol_fallback !== false;
-    const symbolCandidates =
+    let symbolCandidates =
       shouldFallback && hits.length < 2
         ? index.searchSymbols(query, Math.max(3, requestedTopK), symbolFilters)
         : [];
+    if (
+      shouldFallback &&
+      hits.length === 0 &&
+      symbolCandidates.length === 0 &&
+      !mergedFilters.package &&
+      !hasCompleteIndexCoverage()
+    ) {
+      await ensureFresh(false);
+      hits = index.searchCards(query, requestedTopK, mergedFilters);
+      symbolCandidates = index.searchSymbols(query, Math.max(3, requestedTopK), symbolFilters);
+    }
     const hints = hits.length === 0 ? index.fallbackHints(symbolFilters, 5) : null;
 
     const strategy = (() => {
@@ -298,7 +399,7 @@ server.registerTool(
     },
   },
   async ({ symbol, refresh }) => {
-    await ensureFresh(Boolean(refresh));
+    await ensureQualifiedSymbolScope(symbol, Boolean(refresh));
 
     const found = index.lookupSymbol(symbol, 10);
 
@@ -333,7 +434,7 @@ server.registerTool(
       payload = buildPackagePayload(index.packageSummaries(filters), filters, true);
     } else {
       await hydrateIndexFromSnapshot();
-      if (index.hasData()) {
+      if (hasCompleteIndexCoverage()) {
         payload = buildPackagePayload(index.packageSummaries(filters), filters, true);
       } else {
         const registry = await ensureRegistryFresh(false);
@@ -396,7 +497,7 @@ server.registerTool(
     },
   },
   async ({ symbol, refresh }) => {
-    await ensureFresh(Boolean(refresh));
+    await ensureQualifiedSymbolScope(symbol, Boolean(refresh));
 
     const found = index.lookupSource(symbol, 10);
 
@@ -643,4 +744,9 @@ function inferPackageFromRepo(repo: string): string {
 function extractFnName(symbol: string): string {
   const parts = String(symbol || "").split("::");
   return parts.length > 1 ? parts[1] : parts[0];
+}
+
+function extractQualifiedPackage(symbol: string): string | null {
+  const parts = String(symbol || "").split("::");
+  return parts.length > 1 && parts[0].trim() ? parts[0].trim() : null;
 }

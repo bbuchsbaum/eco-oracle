@@ -104,6 +104,16 @@ async function main(): Promise<void> {
         },
       },
       {
+        name: "cold_exact_symbol_targeted",
+        fn: async () => {
+          const index = new ecoIndex.EcoIndex();
+          await withMutedConsoleError(async () => {
+            await index.loadPackages([registry[0]], { force: false });
+          });
+          index.lookupSymbol(symbolQuery, 10);
+        },
+      },
+      {
         name: "warm_packages_from_index",
         fn: async () => {
           packageListing.buildPackagePayload(warmIndex.packageSummaries({}), {}, true);
@@ -317,12 +327,15 @@ function buildComparisons(results: ScenarioResult[]): Record<string, number | nu
   const fullRefresh = lookup.get("cold_full_refresh")?.mean_ms || 0;
   const snapshot = lookup.get("cold_packages_from_snapshot")?.mean_ms || 0;
   const registryOnly = lookup.get("cold_packages_registry_only")?.mean_ms || 0;
+  const targetedSymbol = lookup.get("cold_exact_symbol_targeted")?.mean_ms || 0;
 
   return {
     snapshot_vs_full_refresh:
       snapshot > 0 ? round4(fullRefresh / snapshot) : null,
     registry_only_vs_full_refresh:
       registryOnly > 0 ? round4(fullRefresh / registryOnly) : null,
+    targeted_symbol_vs_full_refresh:
+      targetedSymbol > 0 ? round4(fullRefresh / targetedSymbol) : null,
   };
 }
 
