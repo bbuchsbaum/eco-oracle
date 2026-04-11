@@ -67,6 +67,14 @@ ecooracle::use_ecooracle()
 
 # later, refresh an existing repo to the latest templates
 ecooracle::use_ecooracle(overwrite = TRUE)
+
+# or run the rest of the onboarding flow directly
+ecooracle::use_ecooracle(
+  commit = TRUE,
+  push = TRUE,
+  run_workflow = TRUE,
+  run_discovery = TRUE
+)
 ```
 
 Or manually:

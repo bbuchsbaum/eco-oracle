@@ -49,6 +49,14 @@ ecooracle::use_ecooracle()
 
 # refresh workflow/tool templates later without hand edits
 ecooracle::use_ecooracle(overwrite = TRUE)
+
+# or run commit/push/workflow/discovery without prompts
+ecooracle::use_ecooracle(
+  commit = TRUE,
+  push = TRUE,
+  run_workflow = TRUE,
+  run_discovery = TRUE
+)
 ```
 
 1. Add `.ecosystem.yml` at repo root:
@@ -72,7 +80,7 @@ asset: atlas-pack.tgz
 - copy `tools/eco_atlas_distill.mjs`
 - copy `.github/workflows/eco-atlas.yml` from `tools/eco-atlas.yml`
 
-If you use `ecooracle::use_ecooracle()`, these files are scaffolded for you. Re-run it with `overwrite = TRUE` to refresh an existing package to the current template set.
+If you use `ecooracle::use_ecooracle()`, these files are scaffolded for you. Re-run it with `overwrite = TRUE` to refresh an existing package to the current template set. The helper also fills placeholder `role`/`tags`/`entrypoints` from DESCRIPTION and NAMESPACE, and in interactive sessions it can ask whether to commit, push, trigger `eco-atlas.yml`, and trigger registry discovery.
 
 3. Configure package secrets:
 - `OPENAI_API_KEY` for distillation step

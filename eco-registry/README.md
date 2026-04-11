@@ -48,6 +48,14 @@ ecooracle::use_ecooracle()
 
 # refresh an existing repo to the latest templates
 ecooracle::use_ecooracle(overwrite = TRUE)
+
+# or continue through git + workflow steps
+ecooracle::use_ecooracle(
+  commit = TRUE,
+  push = TRUE,
+  run_workflow = TRUE,
+  run_discovery = TRUE
+)
 ```
 
 Or from a shell, run the bootstrap script:
